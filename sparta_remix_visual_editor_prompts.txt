@@ -1,0 +1,1879 @@
+================================================================================
+SPARTA REMIX VISUAL EDITOR (SRVE) - DEVELOPMENT PROMPTS
+================================================================================
+
+PROJECT OVERVIEW:
+A desktop application for creating Sparta Remix/YTPMV visuals. Uses MIDI data to
+automatically align video clips to audio. Python backend (FFmpeg + MIDI parsing),
+Electron frontend (React UI). Saves projects as .srf (Sparta Remix File).
+
+TECH STACK:
+- Backend: Python 3.10+, FastAPI, ffmpeg-python, mido (MIDI), numpy
+- Frontend: Electron, React, TypeScript
+- Communication: REST API + WebSocket for real-time updates
+- Video Processing: FFmpeg (subprocess calls)
+
+================================================================================
+PHASE 1: PROJECT FOUNDATION
+================================================================================
+
+PROMPT 1A - BACKEND SETUP:
+
+"""
+Create a Python backend for a video editing application called "Sparta Remix Visual Editor" (SRVE).
+
+STRUCTURE:
+```
+srve-backend/
+├── main.py                 # FastAPI entry point
+├── requirements.txt        # Dependencies
+├── api/
+│   ├── __init__.py
+│   ├── routes/
+│   │   ├── __init__.py
+│   │   ├── project.py      # Project save/load endpoints
+│   │   ├── media.py        # Media import endpoints
+│   │   ├── render.py       # Render endpoints
+│   │   └── preview.py      # Preview frame endpoints
+│   └── websocket.py        # WebSocket for progress updates
+├── core/
+│   ├── __init__.py
+│   ├── project.py          # Project data model
+│   ├── layer.py            # Layer data model
+│   ├── midi_parser.py      # MIDI parsing logic
+│   ├── video_processor.py  # FFmpeg wrapper
+│   └── renderer.py         # Main render engine
+├── utils/
+│   ├── __init__.py
+│   ├── ffmpeg_utils.py     # FFmpeg helper functions
+│   └── math_utils.py       # Easing functions, grid calculations
+└── temp/                   # Temporary files directory
+```
+
+REQUIREMENTS.TXT:
+- fastapi
+- uvicorn
+- python-multipart (for file uploads)
+- mido (MIDI parsing)
+- numpy
+- websockets
+- pydantic
+
+MAIN.PY REQUIREMENTS:
+- FastAPI app with CORS enabled (allow Electron frontend)
+- Mount all route modules
+- WebSocket endpoint at /ws for progress updates
+- Startup event to verify FFmpeg is available
+- Store temp directory path in app state
+- Run on port 8765
+
+BUNDLED FFMPEG HANDLING:
+Create utils/ffmpeg_path.py:
+
+1. get_ffmpeg_path() -> str:
+   - In development: Check for system FFmpeg first, fall back to local ./bin/ffmpeg
+   - In production (packaged): Look for FFmpeg in the app resources folder
+   - Path resolution order:
+     a. Environment variable SRVE_FFMPEG_PATH (for overrides)
+     b. {app_directory}/bin/ffmpeg (or ffmpeg.exe on Windows)
+     c. {app_directory}/resources/bin/ffmpeg
+     d. System PATH (development fallback only)
+   - Cache the result after first lookup
+
+2. get_ffprobe_path() -> str:
+   - Same logic as above but for ffprobe
+
+3. verify_ffmpeg() -> tuple[bool, str]:
+   - Run ffmpeg -version
+   - Return (success, version_string or error_message)
+
+All FFmpeg subprocess calls throughout the codebase MUST use get_ffmpeg_path() 
+instead of just "ffmpeg". Example:
+   subprocess.run([get_ffmpeg_path(), "-i", input_path, ...])
+
+DO NOT:
+- Do not use ffmpeg-python library, use subprocess with raw FFmpeg commands for more control
+- Do not implement any actual processing logic yet, just the structure
+- Do not add authentication
+- Do not use async file operations, keep it simple with sync for now
+- Do not hardcode "ffmpeg" as command - always use get_ffmpeg_path()
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 1B - FRONTEND SETUP:
+
+"""
+Create an Electron + React + TypeScript frontend for "Sparta Remix Visual Editor" (SRVE).
+
+STRUCTURE:
+```
+srve-frontend/
+├── package.json
+├── electron/
+│   ├── main.ts             # Electron main process
+│   ├── preload.ts          # Preload script for IPC
+│   └── tsconfig.json
+├── src/
+│   ├── main.tsx            # React entry
+│   ├── App.tsx             # Main app component
+│   ├── index.css           # Global styles (dark theme)
+│   ├── api/
+│   │   ├── client.ts       # HTTP client for backend
+│   │   └── websocket.ts    # WebSocket client
+│   ├── components/
+│   │   ├── Layout/
+│   │   │   └── MainLayout.tsx
+│   │   ├── SourcePanel/
+│   │   │   └── SourcePanel.tsx     # Left panel - source videos
+│   │   ├── LayerPanel/
+│   │   │   └── LayerPanel.tsx      # Left panel - layer list
+│   │   ├── LayerSettings/
+│   │   │   └── LayerSettings.tsx   # Settings for selected layer
+│   │   ├── Preview/
+│   │   │   └── PreviewPanel.tsx    # Right panel - video preview
+│   │   └── Timeline/
+│   │       └── Timeline.tsx        # Bottom - playhead scrubber
+│   ├── stores/
+│   │   └── projectStore.ts         # Zustand store for project state
+│   └── types/
+│       └── index.ts                # TypeScript interfaces
+├── tsconfig.json
+└── vite.config.ts
+```
+
+PACKAGE.JSON DEPENDENCIES:
+- electron
+- electron-builder
+- react, react-dom
+- typescript
+- vite
+- @vitejs/plugin-react
+- zustand (state management)
+- tailwindcss (styling)
+
+STYLING:
+- Dark theme (background #1a1a1a, panels #242424, accent #3b82f6)
+- Use Tailwind CSS
+
+MAIN LAYOUT:
+- Left sidebar (400px): Source pool at top, Layer list below, Layer settings at bottom
+- Right area: Preview panel (maintains 16:9 aspect ratio)
+- Bottom bar: Timeline with playhead
+
+ELECTRON MAIN PROCESS:
+- Single window, 1400x900 minimum size
+- Dev tools enabled in development
+- Load React app from Vite dev server in dev, from dist in production
+
+DO NOT:
+- Do not implement any actual functionality yet, just the visual structure
+- Do not add drag-and-drop yet
+- Do not connect to backend yet
+- Do not add menu bar yet
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 1C - VERIFY COMMUNICATION:
+
+"""
+Connect the SRVE frontend to the backend.
+
+BACKEND CHANGES:
+1. Add a health check endpoint: GET /health that returns {"status": "ok", "ffmpeg": true/false}
+2. Add WebSocket handler that sends a test message on connect
+
+FRONTEND CHANGES:
+1. In api/client.ts:
+   - Create axios instance pointing to http://localhost:8765
+   - Add function checkHealth() that calls /health
+   - Export the client
+
+2. In api/websocket.ts:
+   - Create WebSocket connection to ws://localhost:8765/ws
+   - Add reconnection logic (retry every 3 seconds if disconnected)
+   - Export connection status and message handlers
+
+3. In App.tsx:
+   - On mount, call checkHealth()
+   - Display connection status in bottom-right corner
+   - Green dot if connected, red if not
+   - Show "FFmpeg: OK" or "FFmpeg: NOT FOUND" based on health check
+
+4. In electron/main.ts:
+   - Before creating window, spawn the Python backend as a child process
+   - In development: run "python main.py" from srve-backend directory
+   - Pass environment variables: SRVE_FFMPEG_PATH, SRVE_FFPROBE_PATH
+   - Wait for backend to respond to /health (retry loop, max 10 attempts)
+   - Kill the backend process when Electron closes
+   - Handle backend crash (show error, offer to restart or quit)
+   - Add IPC handler to get backend status
+
+DO NOT:
+- Do not add any other endpoints yet
+- Do not proceed if connection fails, show error to user
+"""
+
+================================================================================
+PHASE 2: DATA MODELS AND PROJECT FILE
+================================================================================
+
+PROMPT 2A - CORE DATA MODELS:
+
+"""
+Implement the core data models for SRVE.
+
+BACKEND - core/project.py:
+
+Create Pydantic models for:
+
+1. ProjectSettings:
+   - output_resolution: tuple[int, int] (default 1920, 1080)
+   - output_codec: Literal["h264", "h265"] (default "h264")
+   - output_audio_bitrate: int (default 320, max 512)
+   - preview_quality: Literal["low", "medium"] (default "low")
+   - global_grid: tuple[int, int] (default 3, 3) - columns x rows
+   - snap_to_grid: bool (default True)
+   - snap_subdivisions: int (default 1) - multiplier for finer snapping
+
+2. VideoClipSettings:
+   - in_point_ms: int (default 0)
+   - out_point_ms: int (default -1, meaning end of video)
+   - loop_mode: Literal["crossfade", "freeze", "continue"] (default "freeze")
+   - crossfade_percent: float (default 10.0) - only used if loop_mode is crossfade
+
+3. FlipMode:
+   - Enum: NONE, ALTERNATING, ROTATION_CW, ROTATION_CCW
+
+4. EasingType:
+   - Enum: LINEAR, EASE_OUT, EASE_IN, EASE_SMOOTH, ELASTIC
+
+5. ZoomEffect:
+   - enabled: bool (default False)
+   - start_scale: float (default 1.0)
+   - end_scale: float (default 1.2)
+   - easing: EasingType (default LINEAR)
+   - easing_intensity: float (default 1.0, range 0.1 to 3.0)
+
+6. LayerEffects:
+   - black_and_white: bool (default False)
+   - wave_enabled: bool (default False)
+   - wave_amplitude: float (default 10.0)
+   - wave_frequency: float (default 2.0)
+   - wave_speed: float (default 1.0)
+   - zoom: ZoomEffect
+
+7. Layer:
+   - id: str (UUID)
+   - name: str
+   - source_video_id: str | None (reference to video in pool)
+   - midi_channel: int (1-16)
+   - clip_settings: VideoClipSettings
+   - grid_position: tuple[int, int] (column, row, 0-indexed)
+   - use_global_grid: bool (default True)
+   - custom_grid: tuple[int, int] | None
+   - flip_mode: FlipMode (default NONE)
+   - velocity_opacity: bool (default True)
+   - note_length_mode: Literal["midi", "4th", "8th", "16th", "32nd"] (default "midi")
+   - effects: LayerEffects
+   - order: int (z-order, higher = on top)
+   - enabled: bool (default True)
+
+8. SourceVideo:
+   - id: str (UUID)
+   - name: str
+   - path: str (absolute path)
+   - duration_ms: int
+   - width: int
+   - height: int
+   - fps: float
+
+9. Project:
+   - version: str (default "1.0")
+   - name: str
+   - settings: ProjectSettings
+   - source_videos: list[SourceVideo]
+   - layers: list[Layer]
+   - midi_file_path: str | None
+   - bgm_path: str | None
+   - bgm_offset_ms: int (default 0)
+   - chorus_video_path: str | None
+   - chorus_offset_ms: int (default 0)
+   - bpm: float | None (extracted from MIDI or manual)
+
+BACKEND - Add method to Project:
+   - to_srf() -> bytes: Serialize to JSON, then gzip compress
+   - from_srf(data: bytes) -> Project: Decompress and deserialize
+
+DO NOT:
+- Do not add file I/O yet, just the models
+- Do not add validation beyond Pydantic defaults
+- Do not add any rendering logic
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 2B - FRONTEND TYPE MIRRORS:
+
+"""
+Mirror the backend data models in the frontend TypeScript types.
+
+FRONTEND - src/types/index.ts:
+
+Create TypeScript interfaces that exactly match the backend Pydantic models:
+- ProjectSettings
+- VideoClipSettings
+- FlipMode (as enum)
+- EasingType (as enum)
+- ZoomEffect
+- LayerEffects
+- Layer
+- SourceVideo
+- Project
+
+FRONTEND - src/stores/projectStore.ts:
+
+Create a Zustand store with:
+
+State:
+- project: Project | null
+- selectedLayerId: string | null
+- isModified: bool
+- playheadMs: number
+
+Actions:
+- newProject(): Create empty project with default settings
+- loadProject(project: Project): Set project state
+- updateSettings(settings: Partial<ProjectSettings>): Update project settings
+- addLayer(): Add new layer with defaults, return layer ID
+- removeLayer(id: string): Remove layer
+- updateLayer(id: string, updates: Partial<Layer>): Update layer properties
+- reorderLayers(orderedIds: string[]): Update layer order
+- selectLayer(id: string | null): Set selected layer
+- addSourceVideo(video: SourceVideo): Add to source pool
+- removeSourceVideo(id: string): Remove from pool
+- setPlayhead(ms: number): Update playhead position
+- setModified(modified: bool): Track unsaved changes
+
+DO NOT:
+- Do not add persistence yet
+- Do not add undo/redo yet
+- Do not connect to backend yet
+"""
+
+================================================================================
+PHASE 3: MEDIA IMPORT
+================================================================================
+
+PROMPT 3A - VIDEO IMPORT:
+
+"""
+Implement source video import functionality.
+
+BACKEND - api/routes/media.py:
+
+1. POST /media/video/analyze
+   - Accept file upload OR file path (for local files)
+   - Use FFprobe to extract: duration, width, height, fps, codec
+   - Return SourceVideo object
+   - Store the file path, do NOT copy the file
+
+2. POST /media/video/thumbnail
+   - Accept video path and timestamp_ms
+   - Use FFmpeg to extract a single frame as JPEG
+   - Return base64-encoded image
+   - Cache thumbnails in temp directory
+
+BACKEND - utils/ffmpeg_utils.py:
+
+1. probe_video(path: str) -> dict:
+   - Run ffprobe with JSON output
+   - Parse and return relevant metadata
+
+2. extract_frame(path: str, timestamp_ms: int, output_path: str) -> str:
+   - Run FFmpeg to extract single frame
+   - Return output path
+
+FRONTEND - components/SourcePanel/SourcePanel.tsx:
+
+1. "Add Video" button that opens native file dialog (via Electron IPC)
+2. Allowed extensions: .mp4, .mov, .avi, .mkv, .webm
+3. On file select, call /media/video/analyze
+4. Display list of imported videos with thumbnails (first frame)
+5. Each video shows: name, duration, resolution
+6. Right-click menu: Remove from pool
+7. Videos can be dragged (implement drag source, drop target comes later)
+
+ELECTRON - Add IPC handler:
+- 'dialog:openVideo': Opens file dialog with video filters, returns path(s)
+
+DO NOT:
+- Do not allow duplicate videos (check by path)
+- Do not copy video files, just reference them
+- Do not implement drag-drop to layers yet
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 3B - MIDI IMPORT:
+
+"""
+Implement MIDI file import and parsing.
+
+BACKEND - core/midi_parser.py:
+
+Using the 'mido' library:
+
+1. parse_midi(path: str) -> MidiData:
+   
+   MidiData model:
+   - bpm: float (from tempo events, default 120 if not found)
+   - duration_ms: int (total length)
+   - channels: dict[int, list[MidiNote]]
+   
+   MidiNote model:
+   - start_ms: int
+   - end_ms: int
+   - note: int (0-127)
+   - velocity: int (0-127)
+   - duration_ms: int (end - start)
+
+2. Logic:
+   - Read MIDI file with mido
+   - Extract tempo (handle tempo changes by using the last tempo before each note)
+   - Convert ticks to milliseconds
+   - Group notes by channel (1-16)
+   - Sort notes by start time within each channel
+
+BACKEND - api/routes/media.py:
+
+1. POST /media/midi/import
+   - Accept file path
+   - Call parse_midi()
+   - Return MidiData
+   - Store path in project
+
+FRONTEND - Add MIDI section to UI:
+
+1. In main layout, add small "MIDI File" section at top of left panel
+2. "Import MIDI" button opens file dialog (.mid, .midi)
+3. Display: filename, BPM, duration, number of channels with notes
+4. Allow manual BPM override (input field)
+5. Show which channels have notes (e.g., "Channels: 1, 2, 5, 10")
+
+FRONTEND - Update projectStore:
+- Add midiData: MidiData | null to state
+- Add setMidiData(data: MidiData | null) action
+
+DO NOT:
+- Do not handle MIDI files without tempo events gracefully (default to 120 BPM)
+- Do not support multiple MIDI files, just one per project
+- Do not parse control change or program change events, only notes
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 3C - BGM AND CHORUS VIDEO:
+
+"""
+Implement BGM (backing track) and chorus video import.
+
+BACKEND - api/routes/media.py:
+
+1. POST /media/audio/analyze
+   - Accept audio file path
+   - Use FFprobe to get duration
+   - Return: path, duration_ms, sample_rate, channels
+
+2. GET /media/audio/waveform
+   - Accept audio path and width (pixels)
+   - Use FFmpeg to generate waveform data (audiowaveform or raw samples)
+   - Return array of amplitude values for visualization
+   - Cache result
+
+FRONTEND - Add BGM section:
+
+1. Below MIDI section, add "Backing Track (BGM)" section
+2. "Import Audio" button (.mp3, .wav, .ogg, .flac, .aac)
+3. Display: filename, duration
+4. Offset input (milliseconds, can be negative)
+5. Small waveform visualization (optional, can skip if complex)
+
+FRONTEND - Add Chorus Video section:
+
+1. Below BGM, add "Background/Chorus Video" section
+2. "Import Video" button (same extensions as source videos)
+3. Display: filename, duration
+4. Offset input (milliseconds)
+5. Small thumbnail preview
+
+FRONTEND - Update projectStore:
+- Add bgm: {path: string, duration_ms: number} | null
+- Add chorusVideo: SourceVideo | null
+- Add actions: setBgm(), setChorusVideo(), setBgmOffset(), setChorusOffset()
+
+DO NOT:
+- Do not implement audio playback yet
+- Do not validate that BGM duration matches MIDI duration (user's responsibility)
+- Do not allow multiple BGM tracks
+"""
+
+================================================================================
+PHASE 4: LAYER SYSTEM
+================================================================================
+
+PROMPT 4A - LAYER LIST UI:
+
+"""
+Implement the layer list panel with basic management.
+
+FRONTEND - components/LayerPanel/LayerPanel.tsx:
+
+1. Header with "Layers" title and "+" button to add new layer
+2. Scrollable list of layers
+3. Each layer item shows:
+   - Drag handle (for reordering)
+   - Visibility toggle (eye icon)
+   - Layer name (editable on double-click)
+   - MIDI channel badge (e.g., "CH 1")
+   - Small thumbnail of assigned source video (or placeholder if none)
+4. Selected layer has highlighted background
+5. Click to select, right-click for context menu:
+   - Duplicate Layer
+   - Delete Layer
+   - Move Up / Move Down
+
+FRONTEND - Implement drag-to-reorder:
+- Use native HTML5 drag and drop or a library like @dnd-kit
+- Dragging a layer reorders it in the list
+- Update layer.order values after reorder
+
+FRONTEND - Update projectStore:
+- Implement duplicateLayer(id: string): Deep copy layer with new ID and name suffix
+
+FRONTEND - Implement drag-drop from source pool:
+- Dragging a source video onto a layer assigns it
+- Visual feedback when dragging over a layer (highlight)
+
+DO NOT:
+- Do not implement layer settings panel yet (next prompt)
+- Do not implement preview updates yet
+- Do not allow more than 16 layers (one per MIDI channel max, though multiple can share)
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 4B - LAYER SETTINGS PANEL:
+
+"""
+Implement the layer settings panel that appears when a layer is selected.
+
+FRONTEND - components/LayerSettings/LayerSettings.tsx:
+
+This panel shows settings for the currently selected layer. Sections:
+
+1. SOURCE VIDEO SECTION:
+   - Dropdown to select from source pool (or "None")
+   - Video thumbnail preview
+   - IN/OUT point sliders (range slider from 0 to video duration)
+   - Display selected range in mm:ss:ms format
+   - Loop mode dropdown: "Crossfade", "Freeze Frame", "Continue"
+   - If crossfade: percentage slider (1-50%)
+
+2. MIDI SECTION:
+   - Channel selector (1-16 dropdown)
+   - Note length mode: "Use MIDI Length", "Force 1/4", "Force 1/8", "Force 1/16", "Force 1/32"
+
+3. POSITION SECTION:
+   - Toggle: "Use Global Grid" (checkbox)
+   - If unchecked: Custom grid inputs (columns x rows)
+   - Grid position: Column and Row dropdowns (0-indexed, based on grid size)
+   - Preview of grid position (small visual showing where this layer sits)
+
+4. FLIP SECTION:
+   - Radio buttons: None / Alternating / Rotation CW / Rotation CCW
+   - Small icon previews showing what each does
+
+5. EFFECTS SECTION:
+   - Velocity → Opacity toggle (checkbox)
+   - Black & White toggle (checkbox)
+   - Wave Effect:
+     - Enable toggle
+     - Amplitude slider (1-50)
+     - Frequency slider (0.5-10)
+     - Speed slider (0.1-5)
+   - Zoom Effect:
+     - Enable toggle
+     - Start scale (0.5-2.0)
+     - End scale (0.5-2.0)
+     - Easing dropdown: Linear, Ease Out, Ease In, Smooth, Elastic
+     - Intensity slider (0.1-3.0)
+
+All inputs should update the layer in projectStore immediately (controlled components).
+
+DO NOT:
+- Do not implement preview updates yet
+- Do not add animation to the settings panel
+- Do not add presets yet
+"""
+
+================================================================================
+PHASE 5: GRID SYSTEM AND POSITIONING
+================================================================================
+
+PROMPT 5A - GRID CALCULATION LOGIC:
+
+"""
+Implement the grid positioning system in the backend.
+
+BACKEND - utils/math_utils.py:
+
+1. calculate_grid_cell(
+    output_resolution: tuple[int, int],
+    grid_size: tuple[int, int],  # (columns, rows)
+    cell_position: tuple[int, int],  # (col, row), 0-indexed
+    snap_subdivisions: int = 1
+) -> dict:
+   
+   Returns:
+   - x: int (top-left x coordinate)
+   - y: int (top-left y coordinate)
+   - width: int (cell width)
+   - height: int (cell height)
+
+   Logic:
+   - cell_width = output_width / columns
+   - cell_height = output_height / rows
+   - x = cell_position[0] * cell_width
+   - y = cell_position[1] * cell_height
+
+2. calculate_subdivided_position(
+    output_resolution: tuple[int, int],
+    grid_size: tuple[int, int],
+    cell_position: tuple[float, float],  # Can be fractional for subdivisions
+    snap_subdivisions: int
+) -> dict:
+   
+   Logic:
+   - If snap_subdivisions > 1, allow positions like 0.5, 1.5, etc.
+   - Snap to nearest subdivision: pos = round(pos * snap_subdivisions) / snap_subdivisions
+
+3. fit_video_to_cell(
+    video_resolution: tuple[int, int],
+    cell_size: tuple[int, int],
+    scale: float = 1.0  # For zoom effect
+) -> dict:
+   
+   Returns:
+   - scale_factor: float
+   - offset_x: int (to center video in cell)
+   - offset_y: int
+   - crop_rect: tuple[int, int, int, int] | None  # If video exceeds cell bounds
+
+   Logic:
+   - Scale video to fill cell while maintaining aspect ratio
+   - Center the video
+   - If scale > 1.0, video may exceed cell bounds, calculate crop
+
+DO NOT:
+- Do not implement the actual FFmpeg filter chain yet
+- Do not handle rotation in this prompt
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 5B - PREVIEW GRID VISUALIZATION:
+
+"""
+Implement the grid preview in the preview panel.
+
+FRONTEND - components/Preview/PreviewPanel.tsx:
+
+1. Canvas-based preview area that maintains 16:9 aspect ratio
+2. Display current output resolution in corner (e.g., "1920x1080")
+
+3. Grid overlay (toggleable):
+   - Draw grid lines based on global grid settings
+   - Label columns (0, 1, 2...) and rows (0, 1, 2...)
+   - Grid lines should be semi-transparent white
+
+4. Layer position visualization:
+   - Show colored rectangles for each enabled layer's position
+   - Each layer gets a distinct color
+   - Selected layer has a thicker border
+   - Show layer name/number in each rectangle
+
+5. Background color: solid dark gray (#1a1a1a) or checkerboard for transparency
+
+6. Controls below preview:
+   - "Show Grid" toggle
+   - Output resolution dropdown: 360p, 480p, 720p, 1080p, 1440p, 4K
+   - Codec dropdown: H.264, H.265
+
+FRONTEND - Update ProjectSettings in store when resolution/codec changes
+
+FRONTEND - Make layer rectangles clickable:
+- Clicking a layer rectangle selects that layer
+- This provides an alternative way to select layers
+
+DO NOT:
+- Do not render actual video frames yet
+- Do not implement timeline/playhead yet
+- Do not implement export yet
+"""
+
+================================================================================
+PHASE 6: MIDI-TO-VIDEO ALIGNMENT ENGINE
+================================================================================
+
+PROMPT 6A - NOTE TIMING AND CLIP GENERATION:
+
+"""
+Implement the core engine that converts MIDI notes to video clip placements.
+
+BACKEND - core/renderer.py:
+
+1. Create class RenderEngine:
+
+   __init__(self, project: Project, midi_data: MidiData)
+   
+2. generate_clip_list(self, layer: Layer) -> list[ClipPlacement]:
+   
+   ClipPlacement model:
+   - start_ms: int (timeline position)
+   - duration_ms: int
+   - source_start_ms: int (position in source video)
+   - velocity: int (0-127)
+   - flip_state: Literal["normal", "h_flip", "v_flip", "hv_flip"]
+   - clip_index: int (which note this is, for alternating effects)
+   
+   Logic:
+   - Get notes for this layer's MIDI channel
+   - For each note:
+     a. Determine clip start_ms from note start
+     b. Determine duration:
+        - If note_length_mode == "midi": use note duration
+        - Else: calculate from BPM (e.g., 1/16 at 120 BPM = 125ms)
+     c. Determine source_start_ms:
+        - Start from layer's in_point
+        - If previous clips used source video, continue from where last clip ended
+        - If reached out_point, apply loop_mode:
+          * "freeze": stay at out_point
+          * "continue": keep going past out_point
+          * "crossfade": will need special handling in FFmpeg
+     d. Apply flip_state based on flip_mode and clip_index
+     e. Store velocity for opacity calculation
+
+3. calculate_flip_state(self, flip_mode: FlipMode, clip_index: int) -> str:
+   - NONE: always "normal"
+   - ALTERNATING: "normal" if even, "h_flip" if odd
+   - ROTATION_CW: cycle through ["normal", "h_flip", "hv_flip", "v_flip"]
+   - ROTATION_CCW: cycle through ["normal", "v_flip", "hv_flip", "h_flip"]
+
+4. generate_all_clips(self) -> dict[str, list[ClipPlacement]]:
+   - Returns dict mapping layer_id to clip list
+   - Only process enabled layers
+
+DO NOT:
+- Do not generate FFmpeg commands yet
+- Do not implement the actual rendering yet
+- Do not handle overlapping notes specially (just place them, FFmpeg handles compositing)
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 6B - FFMPEG FILTER CHAIN GENERATION:
+
+"""
+Implement FFmpeg filter chain generation for rendering.
+
+BACKEND - utils/ffmpeg_utils.py:
+
+1. generate_clip_filter(
+    clip: ClipPlacement,
+    layer: Layer,
+    source: SourceVideo,
+    cell: dict,  # From calculate_grid_cell
+    output_resolution: tuple[int, int]
+) -> str:
+   
+   Generate FFmpeg filter string for a single clip:
+   
+   a. Trim filter: trim=start={source_start_ms}ms:duration={duration_ms}ms
+   b. Scale filter: scale={cell_width}:{cell_height}:force_original_aspect_ratio=decrease
+   c. Pad filter: pad={cell_width}:{cell_height}:(ow-iw)/2:(oh-ih)/2
+   d. Flip filters (if needed): hflip, vflip
+   e. Opacity (from velocity): format=rgba,colorchannelmixer=aa={velocity/127}
+   f. Position overlay: overlay={cell_x}:{cell_y}
+
+2. generate_layer_filter_chain(
+    layer: Layer,
+    clips: list[ClipPlacement],
+    source: SourceVideo,
+    cell: dict,
+    output_resolution: tuple[int, int]
+) -> str:
+   
+   Combine all clips for a layer into a filter chain:
+   - Each clip needs its own trim and processing
+   - Use concat filter to join clips
+   - This gets complex, may need to render layer to intermediate file
+
+3. generate_effect_filters(layer: Layer) -> str:
+   
+   Generate filters for effects:
+   a. Black and white: colorchannelmixer=.3:.4:.3:0:.3:.4:.3:0:.3:.4:.3
+   b. Wave effect: Use displacement map or geq filter
+      - For wave: "[0:v]geq=lum=lum(X+{amp}*sin(2*PI*Y/{freq}+T*{speed}),Y)"
+   c. Zoom effect: scale with animated parameters (complex, may need frame-by-frame)
+
+BACKEND - core/renderer.py:
+
+4. Add to RenderEngine:
+   
+   generate_ffmpeg_command(self, output_path: str) -> list[str]:
+   
+   Build complete FFmpeg command:
+   - Input: all source videos, BGM, chorus video
+   - Complex filter graph compositing all layers
+   - Output: specified codec, resolution, audio
+   
+   This is the most complex part. Strategy:
+   - Render each layer to an intermediate file (simpler, more reliable)
+   - Then composite intermediates with background and add audio
+   - OR: Build one massive filter graph (faster but harder to debug)
+   
+   Start with the intermediate file approach for reliability.
+
+DO NOT:
+- Do not implement the actual rendering execution yet
+- Do not implement progress reporting yet
+- Do not optimize for speed yet (get it working first)
+"""
+
+================================================================================
+PHASE 7: VIDEO EFFECTS IMPLEMENTATION
+================================================================================
+
+PROMPT 7A - BASIC EFFECTS (B&W, FLIP, OPACITY):
+
+"""
+Implement the basic video effects in FFmpeg.
+
+BACKEND - utils/ffmpeg_utils.py:
+
+1. Update generate_clip_filter to properly handle:
+
+   a. Flip effects:
+      - h_flip: Add "hflip" filter
+      - v_flip: Add "vflip" filter  
+      - hv_flip: Add "hflip,vflip" filters
+   
+   b. Velocity opacity:
+      - Convert velocity (0-127) to opacity (0.0-1.0)
+      - Use colorchannelmixer or format=rgba,lutrgb filters
+      - Filter: "format=rgba,colorchannelmixer=aa={opacity}"
+   
+   c. Black and white:
+      - Filter: "colorchannelmixer=.3:.4:.3:0:.3:.4:.3:0:.3:.4:.3"
+      - Apply before opacity for correct blending
+
+2. Create test function:
+   
+   test_basic_effects(source_path: str, output_path: str):
+   - Create a test video with a few clips
+   - Apply each effect type
+   - Useful for debugging filter chains
+
+BACKEND - api/routes/render.py:
+
+1. POST /render/test-clip
+   - Accept: source_path, effects (dict), duration_ms
+   - Generate and render a single test clip
+   - Return path to rendered file
+   - Useful for testing effects in isolation
+
+DO NOT:
+- Do not implement wave or zoom effects yet (next prompt)
+- Do not implement full rendering yet
+- Do not add audio processing yet
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 7B - WAVE EFFECT:
+
+"""
+Implement the wave displacement effect.
+
+BACKEND - utils/ffmpeg_utils.py:
+
+The wave effect creates a sinusoidal displacement that animates over time.
+
+1. generate_wave_filter(
+    amplitude: float,    # pixels of displacement (1-50)
+    frequency: float,    # waves per frame height (0.5-10)
+    speed: float,        # animation speed (0.1-5)
+    fps: float           # video fps for timing
+) -> str:
+
+   FFmpeg approach using geq (generic equation) filter:
+   
+   For horizontal wave (displaces X based on Y position):
+   "geq=lum='lum(X+{amplitude}*sin(2*PI*Y/{wave_length}+N*{speed_factor}),Y)':cb='cb(X+{amplitude}*sin(2*PI*Y/{wave_length}+N*{speed_factor}),Y)':cr='cr(X+{amplitude}*sin(2*PI*Y/{wave_length}+N*{speed_factor}),Y)'"
+   
+   Where:
+   - wave_length = height / frequency
+   - speed_factor = speed * 2 * PI / fps
+   - N is frame number (automatic in FFmpeg)
+
+   Alternative using displacement map:
+   - Generate a gradient image
+   - Use displace filter
+   - More complex but potentially smoother
+
+2. For color video, need to handle all color channels or use format conversion:
+   - Convert to RGB, apply wave to each channel, or
+   - Use the geq filter with proper channel handling
+
+3. Add to generate_effect_filters():
+   - If wave_enabled, add wave filter to chain
+   - Apply after scale but before opacity
+
+TESTING:
+- Add endpoint POST /render/test-wave
+- Accept source video, wave parameters
+- Render 3-second clip with wave effect
+- Return preview
+
+DO NOT:
+- Do not over-optimize the wave filter yet
+- Do not add wave direction options yet (always horizontal displacement)
+- Keep it simple: one wave style that looks like the reference image
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 7C - ZOOM EFFECT WITH EASING:
+
+"""
+Implement the zoom-within-box effect with easing functions.
+
+BACKEND - utils/math_utils.py:
+
+1. Implement easing functions:
+
+   def ease_linear(t: float) -> float:
+       return t
+   
+   def ease_in(t: float, intensity: float = 1.0) -> float:
+       return pow(t, 1 + intensity)
+   
+   def ease_out(t: float, intensity: float = 1.0) -> float:
+       return 1 - pow(1 - t, 1 + intensity)
+   
+   def ease_smooth(t: float, intensity: float = 1.0) -> float:
+       # Smoothstep or bezier curve
+       t = t * t * (3 - 2 * t)  # Basic smoothstep
+       return t
+   
+   def ease_elastic(t: float, intensity: float = 1.0) -> float:
+       # Elastic/bounce effect
+       if t == 0 or t == 1:
+           return t
+       p = 0.3 / intensity
+       return pow(2, -10 * t) * sin((t - p/4) * (2 * PI) / p) + 1
+
+2. def calculate_zoom_scale(
+    t: float,           # Progress 0-1 through clip
+    start_scale: float,
+    end_scale: float,
+    easing: EasingType,
+    intensity: float
+) -> float:
+   
+   - Apply easing function to t
+   - Interpolate between start_scale and end_scale
+   - Return scale factor
+
+BACKEND - utils/ffmpeg_utils.py:
+
+3. generate_zoom_filter(
+    zoom_settings: ZoomEffect,
+    clip_duration_ms: int,
+    cell_size: tuple[int, int],
+    fps: float
+) -> str:
+
+   Challenge: FFmpeg doesn't have built-in animated zoom with easing.
+   
+   Approach A - Frame-by-frame scale (accurate but verbose):
+   - Pre-calculate scale for each frame
+   - Generate zoompan or scale filter with sendcmd
+   
+   Approach B - Use zoompan filter with expression:
+   - zoompan=z='min(max_zoom, 1+progress*delta)':d=duration_frames
+   - Limited easing options
+   
+   Approach C - Use scale with animate:
+   - scale=w='iw*{scale_expr}':h='ih*{scale_expr}'
+   - Where scale_expr uses frame number N
+   
+   For elastic easing, may need to pre-render or accept approximation.
+   
+   Recommended: Start with Approach C for linear/ease_in/ease_out
+   - Expression: 'start + (end-start) * (N/total_frames)^power'
+   
+   For elastic, generate LUT (lookup table) and use interp.
+
+4. The zoom must stay contained in the cell:
+   - After zooming, crop to cell dimensions
+   - Zoom is centered, so crop from center
+
+5. Update generate_clip_filter() to include zoom when enabled.
+
+DO NOT:
+- Do not implement all easings perfectly first pass
+- Start with linear, ease_in, ease_out
+- Elastic can be approximated or simplified
+- Do not worry about sub-frame precision
+"""
+
+================================================================================
+PHASE 8: RENDER ENGINE
+================================================================================
+
+PROMPT 8A - INTERMEDIATE RENDER APPROACH:
+
+"""
+Implement the full render pipeline using intermediate files.
+
+BACKEND - core/renderer.py:
+
+Strategy: Render each layer separately, then composite.
+This is slower but much easier to debug and more reliable.
+
+1. Add to RenderEngine:
+
+   render_layer(
+       self,
+       layer: Layer,
+       clips: list[ClipPlacement],
+       output_path: str,
+       progress_callback: Callable[[float], None] | None = None
+   ) -> str:
+   
+   Steps:
+   a. Get source video for layer
+   b. Calculate grid cell for layer
+   c. For each clip:
+      - Generate FFmpeg command to render clip segment
+      - Apply all effects (flip, opacity, B&W, wave, zoom)
+      - Output to temp file
+   d. Concatenate all clip segments
+   e. Return path to rendered layer video
+   
+   This layer video:
+   - Has transparent background (use prores_ks with alpha or webm)
+   - Is positioned at cell location (overlay on transparent canvas)
+   - Has all effects baked in
+
+2. render_background(self, output_path: str) -> str:
+   
+   Render the chorus/background video:
+   a. Scale to output resolution
+   b. Apply chorus_offset (trim or pad start)
+   c. Mute audio
+   d. Return path
+
+3. composite_all(
+       self,
+       layer_paths: list[tuple[int, str]],  # (z_order, path)
+       background_path: str | None,
+       bgm_path: str | None,
+       output_path: str,
+       progress_callback: Callable[[float], None] | None = None
+   ) -> str:
+   
+   Steps:
+   a. Start with background or black canvas
+   b. Overlay each layer in z-order (lowest first)
+   c. Add BGM audio track
+   d. Apply bgm_offset if needed
+   e. Encode with specified codec/resolution
+   f. Return final output path
+
+4. render_project(
+       self,
+       output_path: str,
+       progress_callback: Callable[[float, str], None] | None = None
+   ) -> str:
+   
+   Full pipeline:
+   a. Generate all clip lists
+   b. Report progress: "Rendering layer 1/5..."
+   c. Render each layer to intermediate
+   d. Render background
+   e. Report progress: "Compositing..."
+   f. Composite all
+   g. Clean up temp files
+   h. Return output path
+
+DO NOT:
+- Do not optimize for speed yet
+- Do not implement single-pass rendering yet
+- Do not skip intermediate files
+- Do not parallelize yet
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 8B - RENDER API AND PROGRESS:
+
+"""
+Implement render API endpoints with WebSocket progress reporting.
+
+BACKEND - api/routes/render.py:
+
+1. POST /render/start
+   - Accept: output_path (optional, generate if not provided)
+   - Validate project has required data (MIDI, at least one layer, BGM)
+   - Start render in background thread
+   - Return: job_id, estimated_duration_ms
+
+2. GET /render/status/{job_id}
+   - Return: status (queued/rendering/complete/error), progress (0-100), current_stage, error_message
+
+3. POST /render/cancel/{job_id}
+   - Cancel ongoing render
+   - Clean up partial files
+
+BACKEND - api/websocket.py:
+
+1. Implement render progress broadcasting:
+   
+   When render_project runs:
+   - Call progress_callback with (progress_percent, stage_description)
+   - WebSocket broadcasts: {"type": "render_progress", "job_id": "...", "progress": 45, "stage": "Rendering layer 2/5"}
+   - On complete: {"type": "render_complete", "job_id": "...", "output_path": "..."}
+   - On error: {"type": "render_error", "job_id": "...", "error": "..."}
+
+BACKEND - Create render job manager:
+
+1. Class RenderJobManager:
+   - jobs: dict[str, RenderJob]
+   - start_job(project: Project) -> str (job_id)
+   - get_status(job_id: str) -> RenderStatus
+   - cancel_job(job_id: str) -> bool
+   
+2. RenderJob:
+   - id: str
+   - project: Project
+   - status: Literal["queued", "rendering", "complete", "error"]
+   - progress: float
+   - current_stage: str
+   - output_path: str | None
+   - error: str | None
+   - thread: Thread
+
+FRONTEND - components/RenderDialog.tsx:
+
+1. Modal dialog for rendering
+2. Shows: progress bar, current stage, elapsed time
+3. Cancel button
+4. On complete: Show success with "Open File" and "Open Folder" buttons
+5. On error: Show error message with "View Log" option
+
+DO NOT:
+- Do not implement queue (one render at a time)
+- Do not implement render presets yet
+- Do not add batch rendering
+"""
+
+================================================================================
+PHASE 9: PREVIEW SYSTEM
+================================================================================
+
+PROMPT 9A - STATIC FRAME PREVIEW:
+
+"""
+Implement static frame preview at current playhead position.
+
+BACKEND - api/routes/preview.py:
+
+1. POST /preview/frame
+   - Accept: timestamp_ms, quality ("low" or "medium")
+   - Generate a single composite frame at that timestamp
+   - Return: base64 JPEG image
+   
+   Logic:
+   a. For each enabled layer:
+      - Determine which clip (if any) is active at timestamp
+      - Extract frame from source video at appropriate source_time
+      - Apply effects (flip, B&W, opacity - skip wave/zoom for speed)
+      - Scale and position
+   b. Composite layers onto background (or black if no chorus)
+   c. Encode as JPEG
+   d. Cache result for this timestamp (invalidate on project change)
+   
+   Quality levels:
+   - "low": 480p, skip wave/zoom effects, JPEG quality 60
+   - "medium": 720p, include all effects, JPEG quality 80
+
+2. POST /preview/frame-range
+   - Accept: start_ms, end_ms, interval_ms, quality
+   - Generate frames at regular intervals
+   - Return: list of {timestamp_ms, image_base64}
+   - Useful for scrubbing
+
+BACKEND - utils/ffmpeg_utils.py:
+
+1. extract_and_process_frame(
+    source_path: str,
+    timestamp_ms: int,
+    effects: LayerEffects,
+    cell: dict,
+    output_resolution: tuple[int, int],
+    quality: str
+) -> bytes:
+   
+   Single FFmpeg command to:
+   - Seek to timestamp
+   - Extract one frame
+   - Apply effects
+   - Scale/position
+   - Output to pipe as JPEG
+
+FRONTEND - components/Preview/PreviewPanel.tsx:
+
+1. Add playhead state: currentTimeMs (from store)
+2. On playhead change (debounced by 100ms):
+   - Call /preview/frame
+   - Display returned image in preview canvas
+3. Add loading indicator while generating preview
+4. Show timestamp display: mm:ss:ms
+
+FRONTEND - components/Timeline/Timeline.tsx:
+
+1. Horizontal bar showing full project duration
+2. Clickable/draggable playhead
+3. Time markers (every second or every beat based on BPM)
+4. Playhead position synced with store
+
+DO NOT:
+- Do not implement video playback yet
+- Do not implement audio playback yet
+- Do not cache too many frames (memory concerns)
+- Preview is for positioning, not for reviewing final output
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 9B - LOW-RES PREVIEW PLAYBACK:
+
+"""
+Implement low-resolution preview playback.
+
+This is optional but significantly improves UX. Can be skipped if time-constrained.
+
+BACKEND - api/routes/preview.py:
+
+1. POST /preview/render-preview
+   - Accept: start_ms, end_ms (optional, default full duration)
+   - Render a low-quality preview video
+   - Resolution: 480p
+   - Skip expensive effects (wave, zoom)
+   - Fast codec: libx264 with preset ultrafast
+   - Include audio (BGM)
+   - Store in temp directory
+   - Return: preview_path, duration_ms
+
+2. GET /preview/stream/{preview_id}
+   - Stream the preview video file
+   - Support range requests for seeking
+
+FRONTEND - components/Preview/PreviewPanel.tsx:
+
+1. Add "Generate Preview" button
+2. On click:
+   - Call /preview/render-preview
+   - Show progress
+   - When complete, load video into HTML5 video element
+3. Video controls: play, pause, seek
+4. Sync video position with timeline playhead
+5. Option to regenerate preview after changes
+
+FRONTEND considerations:
+- Preview video path needs to be accessible to Electron
+- Could use local file URL: file:///path/to/preview.mp4
+- Or stream through backend
+
+DO NOT:
+- Do not make preview update automatically (too slow)
+- Do not implement real-time preview
+- Do not spend too much time on this if basic frame preview works
+"""
+
+================================================================================
+PHASE 10: PROJECT SAVE/LOAD
+================================================================================
+
+PROMPT 10A - SRF FILE FORMAT:
+
+"""
+Implement project save/load with .srf file format.
+
+BACKEND - core/project.py:
+
+1. Add to Project class:
+
+   def to_srf(self) -> bytes:
+       # Serialize to JSON
+       json_data = self.model_dump_json(indent=2)
+       # Gzip compress
+       compressed = gzip.compress(json_data.encode('utf-8'))
+       # Add magic bytes header: "SRF1" (4 bytes)
+       return b'SRF1' + compressed
+   
+   @classmethod
+   def from_srf(cls, data: bytes) -> 'Project':
+       # Check magic bytes
+       if data[:4] != b'SRF1':
+           raise ValueError("Invalid SRF file")
+       # Decompress
+       json_data = gzip.decompress(data[4:]).decode('utf-8')
+       # Deserialize
+       return cls.model_validate_json(json_data)
+
+2. Handle path relativity:
+   - When saving: convert absolute paths to relative (from project file location)
+   - When loading: convert relative paths back to absolute
+   - Store project file location in Project model (excluded from JSON)
+
+BACKEND - api/routes/project.py:
+
+1. POST /project/new
+   - Create new empty project with defaults
+   - Return Project
+
+2. POST /project/save
+   - Accept: Project data, save_path
+   - Convert to SRF, write to file
+   - Return: success, path
+
+3. POST /project/load
+   - Accept: file_path
+   - Read and parse SRF file
+   - Validate all referenced files exist (warn if not)
+   - Return: Project
+
+4. POST /project/export-json
+   - Accept: Project data
+   - Return: pretty-printed JSON (for debugging)
+
+FRONTEND - Implement file operations:
+
+1. In Electron main process, add IPC handlers:
+   - 'dialog:saveProject': Open save dialog with .srf filter
+   - 'dialog:openProject': Open file dialog with .srf filter
+
+2. In App.tsx or projectStore:
+   - saveProject(): 
+     a. If no path, prompt for path
+     b. Call /project/save
+     c. Update window title with filename
+     d. Clear modified flag
+   
+   - loadProject():
+     a. If modified, prompt to save first
+     b. Open file dialog
+     c. Call /project/load
+     d. Update store with loaded project
+     e. Update window title
+
+3. Keyboard shortcuts:
+   - Ctrl+S: Save
+   - Ctrl+Shift+S: Save As
+   - Ctrl+O: Open
+   - Ctrl+N: New
+
+4. Track unsaved changes:
+   - Show * in title bar if modified
+   - Prompt before closing if modified
+
+DO NOT:
+- Do not implement auto-save yet
+- Do not implement recent files yet
+- Do not embed media files in SRF (paths only)
+"""
+
+================================================================================
+PHASE 11: POLISH AND ERROR HANDLING
+================================================================================
+
+PROMPT 11A - ERROR HANDLING:
+
+"""
+Add comprehensive error handling throughout the application.
+
+BACKEND - Add error handling:
+
+1. Create custom exceptions in core/exceptions.py:
+   - SRVEError (base)
+   - FFmpegNotFoundError
+   - InvalidMediaError
+   - RenderError
+   - ProjectValidationError
+   - MIDIParseError
+
+2. In each API route, wrap operations in try/except:
+   - Return appropriate HTTP status codes
+   - Return error details in response body
+   - Log errors with traceback
+
+3. FFmpeg error handling:
+   - Capture stderr from FFmpeg
+   - Parse common errors (file not found, codec issues)
+   - Return meaningful messages
+
+4. Validate project before render:
+   - All referenced files exist
+   - At least one layer enabled
+   - BGM or MIDI exists
+   - Output path is writable
+
+FRONTEND - Add error handling:
+
+1. Global error boundary component
+2. API error handling:
+   - Show toast notifications for non-critical errors
+   - Show modal for critical errors
+   - Include "Copy Error" button for bug reports
+
+3. Validation feedback:
+   - Red border on invalid inputs
+   - Tooltip explaining the issue
+   - Disable render button if project invalid
+
+4. File not found handling:
+   - If source video missing, show placeholder with "Relink" option
+   - Allow relinking to different path
+
+DO NOT:
+- Do not implement crash reporting
+- Do not add excessive validation that slows UX
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 11B - UI POLISH:
+
+"""
+Polish the UI for better user experience.
+
+FRONTEND improvements:
+
+1. Keyboard shortcuts:
+   - Space: Play/Pause preview
+   - Left/Right arrows: Move playhead by 1 second
+   - Shift+Left/Right: Move playhead by 1 beat (based on BPM)
+   - Delete: Remove selected layer
+   - Ctrl+D: Duplicate selected layer
+   - Escape: Deselect
+
+2. Tooltips:
+   - Add tooltips to all icons and non-obvious controls
+   - Include keyboard shortcut hints
+
+3. Loading states:
+   - Show spinners during async operations
+   - Disable controls during operations
+
+4. Responsive layout:
+   - Handle window resize gracefully
+   - Minimum window size enforcement
+   - Collapsible panels for more preview space
+
+5. Visual feedback:
+   - Highlight valid drop targets when dragging
+   - Animate layer reordering
+   - Flash saved indicator on successful save
+
+6. Empty states:
+   - Show helpful prompts when no layers/sources
+   - "Import a video to get started"
+   - "Add a layer and assign a MIDI channel"
+
+7. Theme consistency:
+   - Ensure all components use consistent colors
+   - Consistent spacing and typography
+   - Icons from a single icon set (Lucide recommended)
+
+DO NOT:
+- Do not add animations that slow down the interface
+- Do not add sound effects
+- Do not add onboarding tutorial (can be added later)
+"""
+
+================================================================================
+PHASE 12: FINAL INTEGRATION AND TESTING
+================================================================================
+
+PROMPT 12A - INTEGRATION TESTING:
+
+"""
+Create integration tests and verify full workflow.
+
+TESTING WORKFLOW:
+
+1. Manual test checklist:
+
+   Project basics:
+   [ ] Create new project
+   [ ] Import source video
+   [ ] Import MIDI file
+   [ ] Import BGM
+   [ ] Import chorus video
+   [ ] Add layer
+   [ ] Assign source to layer
+   [ ] Set MIDI channel
+   [ ] Configure grid position
+   [ ] Save project
+   [ ] Load project
+   [ ] All settings preserved
+
+   Layer features:
+   [ ] IN/OUT points work
+   [ ] Each loop mode works
+   [ ] Flip modes work (verify visually)
+   [ ] Velocity opacity works
+   [ ] Note length cutoff works
+   [ ] Black & white effect
+   [ ] Wave effect
+   [ ] Zoom effect with each easing
+
+   Rendering:
+   [ ] Preview frame generation
+   [ ] Preview playback (if implemented)
+   [ ] Full render starts
+   [ ] Progress updates work
+   [ ] Cancel works
+   [ ] Final output plays correctly
+   [ ] Audio is correct
+   [ ] All effects visible in output
+
+2. Create test assets:
+   - Simple test video (10 seconds, solid colors, numbers)
+   - Simple MIDI file (quarter notes on channel 1, 120 BPM)
+   - Test BGM (10 second sine wave)
+   
+3. Automated tests (optional):
+   - Backend: pytest for API endpoints
+   - Frontend: Basic component tests
+
+KNOWN ISSUES TO CHECK:
+- Very long MIDIs (>1000 notes)
+- Very short notes (1/32 at high BPM)
+- Missing files after project load
+- Special characters in file paths
+- Non-standard video codecs
+
+DO NOT:
+- Do not aim for 100% test coverage
+- Focus on happy path and critical error cases
+"""
+
+--------------------------------------------------------------------------------
+
+PROMPT 12B - PACKAGING (SINGLE INSTALLER):
+
+"""
+Package the application as a single installer with all dependencies bundled.
+User should download ONE file, run it, and be ready to use the app. No external installs.
+
+ARCHITECTURE FOR DISTRIBUTION:
+- Electron app is the main executable
+- Python backend is bundled as a frozen executable (PyInstaller)
+- FFmpeg binaries are bundled in resources folder
+- Everything lives in one app folder after install
+
+STEP 1 - BUNDLE PYTHON BACKEND:
+
+1. Create pyinstaller spec file (srve-backend.spec):
+   
+   - Entry point: main.py
+   - Hidden imports: uvicorn, fastapi, mido, pydantic (PyInstaller misses these)
+   - Data files: any config files if needed
+   - One-file mode: NO (use one-folder, more reliable)
+   - Console: NO (--noconsole flag, we don't want terminal popup)
+   
+2. Build command:
+   pyinstaller srve-backend.spec --distpath ./dist/backend
+
+3. Output structure:
+   dist/backend/
+   ├── srve-backend.exe (or srve-backend on Mac/Linux)
+   └── [supporting files PyInstaller adds]
+
+STEP 2 - OBTAIN FFMPEG BINARIES:
+
+1. Download official FFmpeg builds:
+   - Windows: https://www.gyan.dev/ffmpeg/builds/ (ffmpeg-release-essentials.zip)
+   - Mac: https://evermeet.cx/ffmpeg/ (static builds)
+   - Linux: https://johnvansickle.com/ffmpeg/ (static builds)
+
+2. Extract only what we need:
+   - ffmpeg executable
+   - ffprobe executable
+   - That's it. No ffplay, no libs, no docs.
+
+3. Place in project:
+   resources/
+   ├── bin/
+   │   ├── win32/
+   │   │   ├── ffmpeg.exe
+   │   │   └── ffprobe.exe
+   │   ├── darwin/
+   │   │   ├── ffmpeg
+   │   │   └── ffprobe
+   │   └── linux/
+   │       ├── ffmpeg
+   │       └── ffprobe
+
+4. Create download script (scripts/download-ffmpeg.js):
+   - Detects current platform
+   - Downloads appropriate FFmpeg build
+   - Extracts to resources/bin/{platform}/
+   - Run during development setup and before packaging
+
+STEP 3 - CONFIGURE ELECTRON BUILDER:
+
+In package.json, add electron-builder config:
+
+{
+  "build": {
+    "appId": "com.srve.spartaremixvisualeditor",
+    "productName": "Sparta Remix Visual Editor",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/backend",
+        "to": "backend",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "resources/bin/${platform}",
+        "to": "bin",
+        "filter": ["ffmpeg*", "ffprobe*"]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.video"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png",
+      "category": "AudioVideo"
+    },
+    "fileAssociations": [
+      {
+        "ext": "srf",
+        "name": "Sparta Remix File",
+        "description": "Sparta Remix Visual Editor Project",
+        "mimeType": "application/x-sparta-remix",
+        "role": "Editor"
+      }
+    ]
+  }
+}
+
+STEP 4 - UPDATE ELECTRON MAIN PROCESS:
+
+In electron/main.ts, update resource path handling:
+
+1. Get resource paths based on packaged vs development:
+
+   const isDev = !app.isPackaged;
+   
+   const getResourcePath = (relativePath: string) => {
+     if (isDev) {
+       return path.join(__dirname, '..', relativePath);
+     }
+     return path.join(process.resourcesPath, relativePath);
+   };
+   
+   const BACKEND_PATH = isDev 
+     ? 'python main.py'  // Development: run Python directly
+     : getResourcePath('backend/srve-backend' + (process.platform === 'win32' ? '.exe' : ''));
+   
+   const FFMPEG_PATH = getResourcePath('bin/ffmpeg' + (process.platform === 'win32' ? '.exe' : ''));
+   const FFPROBE_PATH = getResourcePath('bin/ffprobe' + (process.platform === 'win32' ? '.exe' : ''));
+
+2. Pass FFmpeg paths to backend via environment:
+
+   const backendProcess = spawn(BACKEND_PATH, [], {
+     env: {
+       ...process.env,
+       SRVE_FFMPEG_PATH: FFMPEG_PATH,
+       SRVE_FFPROBE_PATH: FFPROBE_PATH,
+       SRVE_TEMP_DIR: app.getPath('temp')
+     },
+     cwd: isDev ? path.join(__dirname, '..', 'srve-backend') : undefined
+   });
+
+3. Handle backend lifecycle:
+   - Start backend before creating window
+   - Wait for health check to pass (retry up to 10 times with 500ms delay)
+   - If backend fails to start, show error dialog and quit
+   - Kill backend on app quit (and on crash via process.on('exit'))
+
+4. On Mac/Linux, ensure FFmpeg binaries are executable:
+   
+   if (process.platform !== 'win32') {
+     fs.chmodSync(FFMPEG_PATH, '755');
+     fs.chmodSync(FFPROBE_PATH, '755');
+   }
+
+STEP 5 - BUILD SCRIPTS:
+
+Add to package.json scripts:
+
+{
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd srve-backend && python main.py",
+    "dev:frontend": "vite",
+    "build:backend": "cd srve-backend && pyinstaller srve-backend.spec --distpath ../dist/backend",
+    "build:frontend": "vite build && electron-builder --dir",
+    "build:all": "npm run build:backend && npm run build:frontend",
+    "package:win": "npm run build:all && electron-builder --win",
+    "package:mac": "npm run build:all && electron-builder --mac",
+    "package:linux": "npm run build:all && electron-builder --linux",
+    "download:ffmpeg": "node scripts/download-ffmpeg.js"
+  }
+}
+
+STEP 6 - INSTALLER OUTPUT:
+
+After running package commands, you get:
+
+release/
+├── Sparta Remix Visual Editor Setup 1.0.0.exe  (Windows ~150-200MB)
+├── Sparta Remix Visual Editor-1.0.0.dmg        (Mac ~150-200MB)
+└── Sparta Remix Visual Editor-1.0.0.AppImage   (Linux ~150-200MB)
+
+User experience:
+1. Download one file
+2. Run installer (Windows) or drag to Applications (Mac) or run AppImage (Linux)
+3. Open app
+4. Start making Sparta Remixes
+
+No Python installation. No FFmpeg installation. No terminal. Just works.
+
+STEP 7 - APP ICON:
+
+Create app icon in multiple sizes:
+- icon.ico (Windows): 256x256, 128x128, 64x64, 48x48, 32x32, 16x16
+- icon.icns (Mac): 1024x1024 down to 16x16
+- icon.png (Linux): 512x512
+
+Place in assets/ folder.
+
+Suggestion: Icon could be a stylized "S" with audio waveform or grid pattern.
+
+DO NOT:
+- Do not require user to install anything separately
+- Do not use portable/zip distribution (use proper installer)
+- Do not forget to test on a CLEAN machine (no dev tools installed)
+- Do not hardcode absolute paths anywhere
+- Do not forget to handle Mac app signing requirements (for distribution outside App Store, 
+  users may need to right-click > Open first time, or you need a Developer ID)
+- Do not bundle unnecessary FFmpeg components (ffplay, documentation, etc.)
+
+TESTING CHECKLIST:
+[ ] Fresh Windows VM - download installer, install, run, test full workflow
+[ ] Fresh Mac VM - download DMG, install, run, test full workflow  
+[ ] Fresh Linux VM - download AppImage, run, test full workflow
+[ ] Verify FFmpeg works (render a test project)
+[ ] Verify .srf file association works (double-click opens app)
+[ ] Verify uninstaller works (Windows)
+[ ] Verify no leftover files after uninstall
+"""
+
+================================================================================
+IMPORTANT NOTES FOR ALL PROMPTS
+================================================================================
+
+DO NOT (GLOBAL):
+- Do not use deprecated FFmpeg options
+- Do not use synchronous file operations for large files
+- Do not store sensitive data
+- Do not implement features not in the spec
+- Do not over-engineer early (get it working, then optimize)
+- Do not use FFmpeg libraries (like ffmpeg-python) - use subprocess for control
+- Do not assume video formats - always probe first
+- Do not hard-code paths - use os.path.join and pathlib
+- Do not ignore errors - always handle or propagate
+- Do not block the UI thread for long operations
+- Do not require user to install external dependencies (FFmpeg, Python)
+- Do not hardcode "ffmpeg" or "ffprobe" - always use the path resolution functions
+- Do not assume FFmpeg is in system PATH
+
+USER-FRIENDLINESS PRIORITIES:
+- Single installer, no external dependencies
+- No terminal/command line interaction required
+- Clear error messages (not technical jargon)
+- Sensible defaults for all settings
+- Remember window size/position between sessions
+- Remember last opened project folder
+- Drag and drop everywhere it makes sense
+
+FFMPEG NOTES:
+- Always use -y flag to overwrite
+- Use -hide_banner -loglevel warning for cleaner output
+- Capture stderr for error messages
+- Use -progress pipe:1 for progress reporting
+- For transparency: use -c:v prores_ks -pix_fmt yuva444p10le or webm with VP9
+
+ELECTRON NOTES:
+- Use contextIsolation: true
+- Use preload script for IPC
+- Don't use remote module (deprecated)
+- Handle app quit properly (kill backend process)
+- Backend is spawned as child process, not run separately
+- Use process.resourcesPath for bundled resources in production
+- Use app.isPackaged to detect development vs production
+- Pass FFmpeg paths to backend via environment variables
+- Wait for backend health check before showing window
+
+REACT NOTES:
+- Use functional components with hooks
+- Use Zustand for global state
+- Debounce rapid updates (sliders, scrubbing)
+- Memoize expensive renders
+
+================================================================================
+END OF PROMPTS
+================================================================================

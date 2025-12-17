@@ -1,0 +1,31 @@
+{
+  "video_path": "C:\\Users\\Krasen\\Downloads\\one_tiny_lobe.mp4",
+  "video_hash": "37e898556ed19b7b",
+  "duration_ms": 4733,
+  "lod_info": {
+    "lod0": {
+      "name": "lod0",
+      "num_frames": 0,
+      "thumb_width": 60,
+      "frames_per_minute": 6
+    },
+    "lod1": {
+      "name": "lod1",
+      "num_frames": 2,
+      "thumb_width": 80,
+      "frames_per_minute": 30
+    },
+    "lod2": {
+      "name": "lod2",
+      "num_frames": 9,
+      "thumb_width": 100,
+      "frames_per_minute": 120
+    },
+    "lod3": {
+      "name": "lod3",
+      "num_frames": 24,
+      "thumb_width": 120,
+      "frames_per_minute": 300
+    }
+  }
+}

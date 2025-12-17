@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Loading</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow: hidden;
+      background: transparent;
+    }
+    
+    .splash-container {
+      width: 600px;
+      height: 350px;
+      background-image: url('../assets/splash-bg.png');
+      background-size: cover;
+      background-position: center;
+      border-radius: 12px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    }
+    
+    /* Version info - top left */
+    .version-info {
+      position: absolute;
+      top: 15px;
+      left: 20px;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+    
+    .app-version {
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.9);
+    }
+    
+    .build-number {
+      font-size: 9px;
+      color: rgba(255, 255, 255, 0.6);
+      margin-top: 1px;
+    }
+    
+    /* License info - below version */
+    .license-info {
+      position: absolute;
+      top: 50px;
+      left: 20px;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+    
+    .license-label {
+      font-size: 9px;
+      color: rgba(255, 255, 255, 0.6);
+    }
+    
+    .license-name {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.9);
+      margin-top: 1px;
+    }
+    
+    /* Loading status - bottom left */
+    .status {
+      position: absolute;
+      bottom: 15px;
+      left: 20px;
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.85);
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    }
+  </style>
+</head>
+<body>
+  <div class="splash-container">
+    
+    <div class="version-info">
+      <div class="app-version">SRVE <span id="version">1.0.0</span></div>
+      <div class="build-number">Build <span id="build">001</span></div>
+    </div>
+    
+    <div class="license-info">
+      <div class="license-label">Licensed to:</div>
+      <div class="license-name">Leonidas I, King of Sparta</div>
+    </div>
+    
+    <div class="status" id="status">Initializing application...</div>
+    
+  </div>
+  
+  <script>
+    window.electronAPI.onVersionInfo((version, build) => {
+      document.getElementById('version').textContent = version;
+      document.getElementById('build').textContent = build;
+    });
+    
+    window.electronAPI.onStatus((message) => {
+      document.getElementById('status').textContent = message;
+    });
+  </script>
+</body>
+</html>

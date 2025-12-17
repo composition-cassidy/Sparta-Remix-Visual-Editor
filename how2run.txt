@@ -1,0 +1,5 @@
+cd \SPARTAVISUALCREATOR\srve-backend
+.\.venv\Scripts\python main.py
+
+cd \SPARTAVISUALCREATOR\srve-frontend
+npm run dev

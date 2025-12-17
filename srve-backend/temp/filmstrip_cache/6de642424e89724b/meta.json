@@ -1,0 +1,31 @@
+{
+  "video_path": "C:\\Users\\Krasen\\Downloads\\copy_0FAD7025-EDE1-402E-93F4-2514C57DEE31_sparta_remix.mp4",
+  "video_hash": "6de642424e89724b",
+  "duration_ms": 10300,
+  "lod_info": {
+    "lod0": {
+      "name": "lod0",
+      "num_frames": 1,
+      "thumb_width": 60,
+      "frames_per_minute": 6
+    },
+    "lod1": {
+      "name": "lod1",
+      "num_frames": 5,
+      "thumb_width": 80,
+      "frames_per_minute": 30
+    },
+    "lod2": {
+      "name": "lod2",
+      "num_frames": 21,
+      "thumb_width": 100,
+      "frames_per_minute": 120
+    },
+    "lod3": {
+      "name": "lod3",
+      "num_frames": 52,
+      "thumb_width": 120,
+      "frames_per_minute": 300
+    }
+  }
+}
