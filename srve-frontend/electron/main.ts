@@ -218,6 +218,7 @@ async function ensureBackendRunning(): Promise<boolean> {
         };
         return true;
       } catch {
+        // No existing backend running, will attempt to start one
       }
 
       try {
@@ -442,7 +443,6 @@ ipcMain.handle('trimmer:open', async (_event, params: TrimmerOpenParams) => {
       contextIsolation: true,
       nodeIntegration: false,
       devTools: isDev,
-      webSecurity: false,
     },
   });
 

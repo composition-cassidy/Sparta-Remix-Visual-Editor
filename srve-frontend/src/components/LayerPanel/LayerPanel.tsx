@@ -252,7 +252,8 @@ export function LayerPanel() {
         if (parsed?.id) {
           updateLayer(targetLayer.id, { source_video_id: parsed.id });
         }
-      } catch {
+      } catch (err) {
+        console.error('[LayerPanel] Failed to parse source video drop data:', err);
       } finally {
         setDragOverLayerId(null);
       }
@@ -283,7 +284,8 @@ export function LayerPanel() {
         insertIndex = Math.max(0, Math.min(reordered.length, insertIndex));
         reordered.splice(insertIndex, 0, picked);
         reorderLayers(reordered.map((l) => l.id));
-      } catch {
+      } catch (err) {
+        console.error('[LayerPanel] Failed to parse layer drop data:', err);
       } finally {
         setDragOverLayerId(null);
       }

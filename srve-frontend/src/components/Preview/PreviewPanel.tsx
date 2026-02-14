@@ -1,5 +1,5 @@
 import { useRef, useEffect, useMemo, useState, useCallback, type ChangeEvent, type PointerEvent } from 'react';
-import { getCompositeFrame, renderPreviewSegment } from '../../api/client';
+import { getCompositeFrame, renderPreviewSegment, type CompositeFrameActiveLayer } from '../../api/client';
 import { useProjectStore } from '../../stores/projectStore';
 import type { Layer } from '../../types';
 
@@ -42,7 +42,7 @@ export function PreviewPanel() {
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
-  const frameCacheRef = useRef(new Map<string, { image_base64: string; active_layers: unknown[] }>());
+  const frameCacheRef = useRef(new Map<string, { image_base64: string; active_layers: CompositeFrameActiveLayer[] }>());
   const frameRequestIdRef = useRef(0);
   const frameImageRef = useRef<HTMLImageElement | null>(null);
   const frameImageSrcRef = useRef<string>('');
@@ -152,7 +152,7 @@ export function PreviewPanel() {
         timestamp_ms: tMs,
         quality,
         image_base64: cached.image_base64,
-        active_layers: (cached.active_layers as any) ?? [],
+        active_layers: cached.active_layers ?? [],
       });
       return;
     }
@@ -167,10 +167,11 @@ export function PreviewPanel() {
       })
         .then((res) => {
           if (frameRequestIdRef.current !== requestId) return;
-          frameCacheRef.current.set(key, { image_base64: res.image_base64, active_layers: res.active_layers as any });
-          if (frameCacheRef.current.size > 50) {
+          frameCacheRef.current.set(key, { image_base64: res.image_base64, active_layers: res.active_layers });
+          while (frameCacheRef.current.size > 50) {
             const first = frameCacheRef.current.keys().next().value;
             if (first) frameCacheRef.current.delete(first);
+            else break;
           }
           setPreviewFrame({
             timestamp_ms: tMs,
@@ -179,7 +180,8 @@ export function PreviewPanel() {
             active_layers: res.active_layers,
           });
         })
-        .catch(() => {
+        .catch((err) => {
+          console.error('[PreviewPanel] Failed to fetch composite frame:', err);
         });
     }, isScrubbing ? 220 : 260);
 

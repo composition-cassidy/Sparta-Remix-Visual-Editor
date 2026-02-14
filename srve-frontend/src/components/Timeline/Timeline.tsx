@@ -44,6 +44,7 @@ export function Timeline() {
   const previewQuality = useProjectStore((s) => s.previewQuality);
   const setPreviewQuality = useProjectStore((s) => s.setPreviewQuality);
   const playbackState = useProjectStore((s) => s.playbackState);
+  const bgm = useProjectStore((s) => s.bgm);
 
   const [collapsed, setCollapsed] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -81,9 +82,9 @@ export function Timeline() {
 
   const durationMs = useMemo(() => {
     const midiDur = midiData?.duration_ms ?? 0;
-    const bgmDur = 0;
+    const bgmDur = bgm?.duration_ms ?? 0;
     return Math.max(1000, midiDur, bgmDur);
-  }, [midiData?.duration_ms]);
+  }, [bgm?.duration_ms, midiData?.duration_ms]);
 
   const pxPerMs = 0.05 * zoom;
   const timelineWidth = Math.max(600, Math.floor(durationMs * pxPerMs));
